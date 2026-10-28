@@ -1,0 +1,22 @@
+services:
+  spotify-dl:
+    build: .
+    image: spotify-dl-web:latest
+    container_name: spotify-dl
+    restart: unless-stopped
+    environment:
+      APP_PASSWORD: ${APP_PASSWORD:?APP_PASSWORD must be set}
+      SECRET_KEY: ${SECRET_KEY:-}
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-UTC}
+      DEFAULT_AUDIO_FORMAT: ${DEFAULT_AUDIO_FORMAT:-m4a}
+      DEFAULT_CONCURRENT: ${DEFAULT_CONCURRENT:-3}
+      MAX_CONCURRENT: ${MAX_CONCURRENT:-8}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    ports:
+      - "${WEB_PORT:-8000}:8000"
+    volumes:
+      - ./data:/data
+      - ./downloads:/downloads
+    stop_grace_period: 30s

@@ -6,7 +6,7 @@ import concurrent.futures
 from typing import TypedDict
 from time import sleep
 from random import uniform
-from sys import exit
+from sys import exit, stdout
 from itertools import chain
 
 from spotapi import Public
@@ -23,6 +23,12 @@ client = None
 class PlaylistInfo(TypedDict):
     title: str
     artist: str
+
+
+def log(message: str = "") -> None:
+    """Write a whole line at once so concurrent workers do not interleave."""
+
+    stdout.write(f"{message}\n")
 
 
 def get_playlist_info(playlist_id: str) -> list[PlaylistInfo]:
@@ -78,12 +84,12 @@ def get_song_url(song_info: PlaylistInfo) -> tuple[str, str]:
         client = YTMusic()
     data = client.search(f"{song_info['title']} {song_info['artist']}")
 
-    # case where there are absolutely no results ("no results for... try different keyword")
+    # case where there are absolutely no results
+    # ("no results for... try different keyword")
     if not data:
         # search only using title. opt for less specific searching
         data = client.search(f"{song_info['title']}")
 
-    
     # worst case, still nothing. just give up.
     if not data:
         return ("", "")
@@ -96,15 +102,22 @@ def get_song_url(song_info: PlaylistInfo) -> tuple[str, str]:
     songs = [entry for entry in data if entry["resultType"] == "song"]
     matches = [song for song in songs if song_info["title"] in song["title"]]
     # in the most ideal cases the titles are exactly the same,
-    # but sometimes ytmusic has longer titles containing translations for non english songs
+    # but sometimes ytmusic has longer titles containing translations
+    # for non english songs
 
     if matches:
         match = matches[0]
         return url_part + match["videoId"], match["title"]
 
-    # if there is no Song result that exactly matches the given info, return first Song or Video
+    # if there is no Song result that exactly matches the given info,
+    # return first Song or Video
     # removed top result because top result can sometimes contain albums
-    streams = [entry for entry in data if entry["resultType"] in ("song", "video")]
+    streams = [
+        entry for entry in data
+        if entry["resultType"] in ("song", "video")
+    ]
+    if not streams:
+        return ("", "")
     return url_part + streams[0]["videoId"], streams[0]["title"]
 
 
@@ -118,13 +131,13 @@ def get_song_urls(playlist_info: list[PlaylistInfo],
         Reports and prints status to user,
         returns matched url."""
 
-        print(f"[MATCHING] {song_info['title']}")
+        log(f"[MATCHING] {song_info['title']}")
         url, title = get_song_url(song_info)
 
         if url:
-            print(f"[FOUND] {title} ({url})")
+            log(f"[FOUND] {title} ({url})")
         else:
-            print(f"[NO MATCH] {song_info['title']}")
+            log(f"[NO MATCH] {song_info['title']}")
 
         sleep(uniform(1, 2.5))
 

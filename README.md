@@ -110,41 +110,129 @@ Unlike most downloader, this program **does not** require a Spotify Developers a
 3. Run the program with your playlist URL.
 
    ```sh
-   python -m spotify-dl playlist_url
+   python spotify-dl.py playlist_url
    ```
 
 **Available Options**
 - To get help on available options:
 
   ```sh
-  python -m spotify-dl --help
+  python spotify-dl.py --help
   ```
 
 - To specify where to store dowloaded files:
   ```sh
-  python -m spotify-dl -o path playlist_url
+  python spotify-dl.py -o path playlist_url
   ```
 
 - To change audio format (for example mp3):
   ```sh
-  python -m spotify-dl -f mp3 playlist_url
+  python spotify-dl.py -f mp3 playlist_url
   ```
 
 - To set how many songs are matched at the same time (default: 3. *P.S. There is no hard limit set, but please don't go wild*)
   ```sh
-  python -m spotify-dl -c 5 playlist_url
+  python spotify-dl.py -c 5 playlist_url
   ```
 
 - To enable yt-dlp's [`--download-archive`](https://github.com/yt-dlp/yt-dlp?tab=readme-ov-file#video-selection) option
   > Download only videos not listed in the archive file. Record the IDs of all downloaded videos in it.
   ```sh
-  python -m spotify-dl --download_archive FILE playlist_url
+  python spotify-dl.py --download_archive FILE playlist_url
   ```
 
 - To save as `<title> - <artist>.<ext>` instead of the default `<artist> - <title>.<ext>`:
   ```sh
-  python -m spotify-dl --title-first playlist_url
+  python spotify-dl.py --title-first playlist_url
   ```
+
+### Using the Web UI
+
+The repository also ships an optional web interface (FastAPI + Jinja/HTMX) to
+start downloads, watch live logs and keep a job history. One download runs at
+a time; new jobs wait in a queue.
+
+1. Install the web extras and start the server.
+
+   ```sh
+   uv sync --extra web
+
+   # Linux/macOS
+   export APP_PASSWORD=change-me
+
+   # Windows PowerShell
+   $env:APP_PASSWORD = "change-me"
+
+   uv run --extra web uvicorn web.app:app --host 0.0.0.0 --port 8000
+   ```
+
+2. Open <http://localhost:8000> and sign in with `APP_PASSWORD`.
+
+The UI writes its SQLite history to `./data` and downloads to `./downloads`
+by default. Configure it with these environment variables:
+
+| Variable               | Default       | Description                                            |
+| ---------------------- | ------------- | ------------------------------------------------------ |
+| `APP_PASSWORD`         | *required*    | Password for the single-user login.                    |
+| `SECRET_KEY`           | auto          | Session signing key, generated and stored in `/data`.  |
+| `DATA_DIR`             | `./data`      | SQLite database, logs and generated secret.            |
+| `DOWNLOAD_DIR`         | `./downloads` | Where songs are stored.                                |
+| `DEFAULT_AUDIO_FORMAT` | `m4a`         | Preselected format.                                    |
+| `DEFAULT_CONCURRENT`   | `3`           | Preselected concurrent match count.                    |
+| `MAX_CONCURRENT`       | `8`           | Upper bound allowed from the UI.                       |
+| `SESSION_MAX_AGE`      | `604800`      | Session lifetime in seconds.                           |
+| `COOKIE_SECURE`        | `false`       | Set to `true` when the UI is served over HTTPS.        |
+
+## Docker
+
+The image bundles `ffmpeg`, so nothing else needs to be installed on the host.
+
+```sh
+cp .env.example .env
+# edit APP_PASSWORD in .env
+docker compose up -d --build
+```
+
+The UI is then available on <http://localhost:8000> (change `WEB_PORT` in
+`.env` to move it). Persistent data lives in:
+
+- `./data` - job history (`jobs.db`), per-job logs and the session secret
+- `./downloads` - downloaded songs
+
+The container starts as root only to fix ownership of those two folders to
+`PUID`/`PGID`, then drops privileges.
+
+### Deploying with Dockhand
+
+[Dockhand](https://dockhand.pro/) can deploy this repository as a git-managed
+stack:
+
+1. Push the repository to a Git remote that Dockhand can reach.
+2. In Dockhand, create a stack from **Git**, point it at the repository and set
+   the compose path to `docker-compose.yml`.
+3. Enable **Build images on deploy** - the compose file uses `build: .`.
+4. Add `APP_PASSWORD` as a stack environment variable (or secret). The other
+   variables from `.env.example` are optional.
+5. Deploy.
+
+Dockhand clones the repository into its own data directory, so the relative
+`./data` and `./downloads` mounts resolve inside the stack folder. If your
+Dockhand instance uses a named data volume instead of matching host paths, see
+Dockhand's *Data storage & volume paths* section and switch it to matching
+paths (`-v /opt/dockhand:/opt/dockhand` with `DATA_DIR=/opt/dockhand`).
+
+If the UI sits behind a reverse proxy, disable response buffering for the
+live log stream, for example in nginx:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_buffering off;
+    proxy_read_timeout 3600s;
+}
+```
 
 ## Issues
 If you have encountered problems, please read the [guidelines](CONTRIBUTING.md#reporting-issuesasking-questions) for detailed instructions on how to open an issue.

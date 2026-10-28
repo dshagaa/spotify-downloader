@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="layout">
+  <section class="card">
+    <h1>New download</h1>
+    <p class="muted">
+      Paste a public Spotify playlist link. Each track is matched on
+      YouTube Music and downloaded with metadata and cover art.
+    </p>
+    {% if error %}<p class="alert err">{{ error }}</p>{% endif %}
+    {% set selected_format = values.get('audio_format', defaults.format) %}
+    {% set selected_concurrent = values.get('max_concurrent', defaults.concurrent) %}
+    <form method="post" action="/jobs" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Playlist URL or ID
+        <input name="playlist_url" required autofocus
+               placeholder="https://open.spotify.com/playlist/..."
+               value="{{ values.get('playlist_url', '') }}">
+      </label>
+      <div class="grid2">
+        <label>Audio format
+          <select name="audio_format">
+            {% for format in formats %}
+            <option value="{{ format }}"
+              {% if format == selected_format %}selected{% endif %}>
+              {{ format }}
+            </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Concurrent matches
+          <input type="number" name="max_concurrent" min="1"
+                 max="{{ max_concurrent }}" value="{{ selected_concurrent }}">
+        </label>
+      </div>
+      <label>Output subfolder <span class="muted">(optional)</span>
+        <input name="subfolder" maxlength="64"
+               placeholder="chill-mix"
+               pattern="[A-Za-z0-9 ._-]{1,64}"
+               value="{{ values.get('subfolder', '') }}">
+      </label>
+      <p class="hint muted small">Files are saved under {{ download_dir }}.</p>
+      <div class="checks">
+        <label class="check">
+          <input type="checkbox" name="title_first"
+                 {% if values.get('title_first') %}checked{% endif %}>
+          Name files "Title - Artist"
+        </label>
+        <label class="check">
+          <input type="checkbox" name="download_archive"
+                 {% if values.get('download_archive') %}checked{% endif %}>
+          Skip tracks already downloaded (archive)
+        </label>
+      </div>
+      <button class="btn primary" type="submit">Download playlist</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Recent jobs</h2>
+      <span class="muted small">auto-refreshes</span>
+    </div>
+    {% include "_jobs.html" %}
+  </section>
+</div>
+{% endblock %}

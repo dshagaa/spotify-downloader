@@ -6,8 +6,12 @@ venv/
 
 build/
 dist/
+*.egg-info/
 
 *.swp
 
 downloads/
+data/
 ignore/
+
+.env

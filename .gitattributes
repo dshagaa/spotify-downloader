@@ -1,0 +1,3 @@
+# Shell scripts must keep LF endings so the container entrypoint's shebang works
+# even when the repository is cloned on Windows.
+*.sh text eol=lf

@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "spotify-dl"
 version = "1.4.0"
@@ -14,6 +18,22 @@ dependencies = [
     "yt-dlp>=2026.3.17",
     "ytmusicapi>=1.11.5",
 ]
+
+[project.optional-dependencies]
+web = [
+    "fastapi>=0.115.0",
+    "itsdangerous>=2.2.0",
+    "jinja2>=3.1.4",
+    "python-multipart>=0.0.12",
+    "uvicorn[standard]>=0.30.0",
+]
+
+[tool.setuptools]
+py-modules = ["core"]
+packages = ["web"]
+
+[tool.setuptools.package-data]
+web = ["templates/*.html", "static/*"]
 
 [project.urls]
 Source = "https://github.com/invzfnc/spotify-downloader"

@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ job.playlist_label[:10] }}… · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="card" data-job-id="{{ job.id }}"
+         data-job-status="{{ job.status }}">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow muted small">Job {{ job.id }}</p>
+      <h1 class="mono">{{ job.playlist_label }}</h1>
+    </div>
+    <span id="job-status" class="badge {{ job.status_class }}">
+      {{ job.status }}
+    </span>
+  </div>
+
+  <dl class="meta">
+    <div>
+      <dt>Playlist</dt>
+      <dd class="mono break">{{ job.playlist_url }}</dd>
+    </div>
+    <div>
+      <dt>Format</dt>
+      <dd class="mono">{{ job.audio_format }}</dd>
+    </div>
+    <div>
+      <dt>Concurrent matches</dt>
+      <dd>{{ job.max_concurrent }}</dd>
+    </div>
+    <div>
+      <dt>Output folder</dt>
+      <dd class="mono break">{{ job.output_dir }}</dd>
+    </div>
+    <div>
+      <dt>Filename</dt>
+      <dd>{% if job.title_first %}Title - Artist{% else %}Artist - Title{% endif %}</dd>
+    </div>
+    <div>
+      <dt>Archive</dt>
+      <dd>{% if job.download_archive %}enabled{% else %}disabled{% endif %}</dd>
+    </div>
+    <div>
+      <dt>Created</dt>
+      <dd>{{ job.created_display }}</dd>
+    </div>
+    <div>
+      <dt>Duration</dt>
+      <dd>{{ job.duration }}</dd>
+    </div>
+  </dl>
+
+  <p id="job-stats" class="stats muted">
+    {{ job.matched }} matched · {{ job.no_match }} not found
+  </p>
+  {% if job.error %}<p class="alert err">{{ job.error }}</p>{% endif %}
+
+  <div class="actions">
+    {% if job.is_active %}
+    <form method="post" action="/jobs/{{ job.id }}/cancel">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="btn danger" type="submit">Cancel download</button>
+    </form>
+    {% else %}
+    <form method="post" action="/jobs/{{ job.id }}/delete"
+          data-confirm="Remove this job from history?">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="btn ghost" type="submit">Delete job</button>
+    </form>
+    {% endif %}
+    <a class="btn ghost" href="/">Back to dashboard</a>
+  </div>
+
+  <h2 class="log-title">Log</h2>
+  <pre id="log" class="log" tabindex="0" aria-live="polite"></pre>
+</section>
+{% endblock %}

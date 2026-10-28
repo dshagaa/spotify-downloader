@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Not found · {{ app_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Job not found</h1>
+  <p class="muted">No job with id <code>{{ job_id }}</code> exists.</p>
+  <a class="btn ghost" href="/">Back to dashboard</a>
+</section>
+{% endblock %}
