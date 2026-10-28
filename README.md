@@ -77,6 +77,11 @@ Unlike most downloader, this program **does not** require a Spotify Developers a
   spotify-dl.exe --title-first playlist_url
   ```
 
+- Every run also writes an M3U8 playlist (`<playlist name>.m3u8`) into the
+  output folder. It lists the tracks that were actually saved, including
+  tracks skipped by the download archive when their files are present, and
+  opens in players such as VLC, MusicBee and foobar2000.
+
 ### Using Source Code
 1. Clone the repository.
 
@@ -173,7 +178,9 @@ a time; new jobs wait in a queue. Each job shows a progress bar and live log.
 2. Open <http://localhost:8000> and sign in with `APP_PASSWORD`.
 
 Each playlist is stored in its own folder named after the playlist (sanitized
-for the filesystem) unless you enter an output subfolder on the form.
+for the filesystem) unless you enter an output subfolder on the form. A
+`<playlist name>.m3u8` file with the saved tracks is written next to the
+downloads.
 
 The UI writes its SQLite history to `./data` and downloads to `./downloads`
 by default. Configure it with these environment variables:

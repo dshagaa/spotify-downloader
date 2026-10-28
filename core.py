@@ -5,13 +5,14 @@ import concurrent.futures
 import json
 import re
 
-from typing import TypedDict
+from contextlib import ExitStack
+from typing import Any, TypedDict
 from time import sleep
 from random import uniform
 from sys import exit, stdout
 from itertools import chain
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from spotapi import Public
@@ -28,6 +29,14 @@ client = None
 class PlaylistInfo(TypedDict):
     title: str
     artist: str
+
+
+class TrackRecord(TypedDict):
+    """A downloaded track, as written to the M3U8 playlist."""
+
+    title: str
+    artist: str
+    path: str
 
 
 def log(message: str = "") -> None:
@@ -98,6 +107,110 @@ def get_playlist_name(playlist_url: str) -> str | None:
     if not isinstance(title, str):
         return None
     return title.strip() or None
+
+
+def _video_id(url: str) -> str:
+    """Return the YouTube video ID from a watch URL (or the last path part)."""
+
+    if not url:
+        return ""
+    query = parse_qs(urlparse(url).query)
+    values = query.get("v")
+    if values:
+        return values[0]
+    return url.rsplit("/", 1)[-1]
+
+
+def _display_value(info: dict[str, Any], *keys: str, default: str) -> str:
+    """Return the first non-empty string field, collapsed to one line."""
+
+    for key in keys:
+        value = info.get(key)
+        if isinstance(value, str) and value.strip():
+            return " ".join(value.split())
+    return default
+
+
+def _archived_ids(archive: str | None) -> set[str]:
+    """Return the IDs recorded in a yt-dlp download archive file."""
+
+    if not archive:
+        return set()
+    try:
+        text = Path(archive).read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    ids: set[str] = set()
+    for line in text.splitlines():
+        parts = line.split()
+        if parts:
+            ids.add(parts[-1])
+    return ids
+
+
+def _final_path(filename: str | None, audio_format: str) -> Path | None:
+    """Return the existing audio file for a yt-dlp download, if any."""
+
+    if not filename:
+        return None
+    path = Path(filename)
+    converted = path.with_suffix(f".{audio_format}")
+    for candidate in (converted, path):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def write_playlist_file(output_dir: str, playlist_name: str | None,
+                        tracks: list[TrackRecord]) -> Path | None:
+    """Write an M3U8 playlist of the downloaded tracks, in playlist order."""
+
+    if not tracks:
+        return None
+
+    base = Path(output_dir)
+    name = sanitize_name(playlist_name or base.name or "playlist")
+    target = base / f"{name}.m3u8"
+
+    lines = ["#EXTM3U"]
+    seen: set[str] = set()
+    for track in tracks:
+        path = Path(track["path"])
+        if path.as_posix() in seen:
+            continue
+        seen.add(path.as_posix())
+
+        try:
+            relative = path.relative_to(base)
+        except ValueError:
+            relative = Path(path.name)
+
+        label = track["title"]
+        if track["artist"]:
+            label = f"{track['artist']} - {label}"
+        lines.append(f"#EXTINF:-1,{label}")
+        lines.append(relative.as_posix())
+
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return target
+
+
+class _TrackingYDL(YoutubeDL):
+    """YoutubeDL that remembers entries skipped by the download archive."""
+
+    skipped_archive: list[dict[str, Any]]
+
+    def __init__(self, params: Any = None, *args: Any,
+                 **kwargs: Any) -> None:
+        super().__init__(params, *args, **kwargs)
+        self.skipped_archive = []
+
+    def _match_entry(self, info_dict: dict[str, Any], *args: Any,
+                     **kwargs: Any) -> Any:
+        reason = super()._match_entry(info_dict, *args, **kwargs)
+        if reason and "already been recorded in the archive" in reason:
+            self.skipped_archive.append(dict(info_dict))
+        return reason
 
 
 def get_playlist_info(playlist_id: str) -> list[PlaylistInfo]:
@@ -231,8 +344,11 @@ def get_song_urls(playlist_info: list[PlaylistInfo],
 
 def download_from_urls(urls: list[str], output_dir: str,
                        audio_format: str, title_first: bool,
-                       download_archive: str | None) -> None:
+                       download_archive: str | None,
+                       playlist_name: str | None = None) -> None:
     """Downloads list of songs with yt-dlp"""
+
+    finished: dict[str, dict[str, Any]] = {}
 
     def report_download(status: dict) -> None:
         """Log a marker for each finished download (used by the web UI)."""
@@ -240,6 +356,8 @@ def download_from_urls(urls: list[str], output_dir: str,
         if status.get("status") != "finished":
             return
         info = status.get("info_dict") or {}
+        key = str(info.get("id") or _video_id(info.get("webpage_url", "")))
+        finished[key] = dict(info)
         log(f"[DONE] {info.get('title') or 'track'}")
 
     if not output_dir.endswith("/"):
@@ -289,9 +407,75 @@ def download_from_urls(urls: list[str], output_dir: str,
             output_dir, download_archive
         )
 
+    # yt-dlp checks the archive before extracting metadata, so archived
+    # tracks need a metadata-only lookup to recover their filenames.
+    archive_file = options.get("download_archive")
+    archived = _archived_ids(
+        archive_file if isinstance(archive_file, str) else None
+    )
+    metadata_options = dict(options)
+    metadata_options.pop("download_archive", None)
+    metadata_options.pop("progress_hooks", None)
+    metadata_options["quiet"] = True
+    metadata_options["no_warnings"] = True
+
     # downloads stream with highest bitrate
-    with YoutubeDL(options) as ydl:
+    with ExitStack() as stack:
+        ydl = stack.enter_context(_TrackingYDL(options))
         ydl.download(urls)
+
+        skipped = {
+            str(info.get("id") or _video_id(info.get("webpage_url", ""))): info
+            for info in ydl.skipped_archive
+        }
+        metadata: YoutubeDL | None = None
+        records: list[TrackRecord] = []
+        for url in urls:
+            video_id = _video_id(url)
+            info = finished.get(video_id)
+            prepared: str | None = None
+
+            if info is not None:
+                prepared = info.get("_filename") or info.get("filepath")
+            elif video_id in skipped:
+                info = skipped[video_id]
+                try:
+                    prepared = ydl.prepare_filename(info)
+                except Exception:
+                    prepared = None
+            elif video_id in archived:
+                if metadata is None:
+                    metadata = stack.enter_context(
+                        YoutubeDL(metadata_options)
+                    )
+                try:
+                    info = metadata.extract_info(url, download=False)
+                except Exception:
+                    info = None
+                if info:
+                    try:
+                        prepared = metadata.prepare_filename(info)
+                    except Exception:
+                        prepared = None
+            else:
+                continue
+
+            path = _final_path(prepared, audio_format)
+            if path is None or info is None:
+                continue
+            records.append({
+                "title": _display_value(
+                    info, "track", "title", default="track"
+                ),
+                "artist": _display_value(
+                    info, "artist", "creator", "uploader", default=""
+                ),
+                "path": str(path),
+            })
+
+    playlist = write_playlist_file(output_dir, playlist_name, records)
+    if playlist is not None:
+        log(f"[PLAYLIST] {playlist}")
 
 
 def main(playlist_id: str,
@@ -307,8 +491,10 @@ def main(playlist_id: str,
         print("Invalid playlist URL. Aborting operation.")
         exit(1)
 
+    playlist_name = get_playlist_name(playlist_id)
+
     if subfolder is None:
-        subfolder = sanitize_name(get_playlist_name(playlist_id) or "")
+        subfolder = sanitize_name(playlist_name or "")
 
     if subfolder:
         output_dir = str(Path(output_dir) / subfolder)
@@ -318,7 +504,7 @@ def main(playlist_id: str,
 
     download_urls = get_song_urls(playlist_info, concurrent_limit)
     download_from_urls(download_urls, output_dir, audio_format,
-                       title_first, download_archive)
+                       title_first, download_archive, playlist_name)
 
 
 if __name__ == "__main__":
