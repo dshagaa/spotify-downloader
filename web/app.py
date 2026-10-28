@@ -35,6 +35,12 @@ from .auth import (
 )
 from .config import APP_NAME, SUPPORTED_FORMATS, Settings, load_settings
 from .db import ACTIVE_STATUSES, JobStore, TERMINAL_STATUSES
+from .progress import (
+    Progress,
+    ProgressTracker,
+    progress_from_counts,
+    scan_log,
+)
 from .jobs import JobManager
 from .playlists import normalize_playlist, normalize_subfolder
 
@@ -123,7 +129,19 @@ def _duration(job: dict[str, Any]) -> str:
     return f"{hours}h {minutes}m"
 
 
-def _decorate(job: dict[str, Any]) -> dict[str, Any]:
+def _progress(job: dict[str, Any], log_dir: Path) -> Progress:
+    if job["status"] in TERMINAL_STATUSES:
+        return progress_from_counts(
+            job["status"],
+            total=job["total_tracks"],
+            matched=job["matched"],
+            no_match=job["no_match"],
+            downloaded=job["downloaded"],
+        )
+    return scan_log(log_dir / f"{job['id']}.log", job["status"])
+
+
+def _decorate(job: dict[str, Any], log_dir: Path) -> dict[str, Any]:
     item = dict(job)
     item["status_class"] = STATUS_CLASS.get(job["status"], "muted")
     item["is_active"] = job["status"] in ACTIVE_STATUSES
@@ -133,6 +151,7 @@ def _decorate(job: dict[str, Any]) -> dict[str, Any]:
     item["created_display"] = _display_time(job["created_at"])
     item["finished_display"] = _display_time(job.get("finished_at"))
     item["duration"] = _duration(job)
+    item["progress"] = _progress(job, log_dir)
     return item
 
 
@@ -221,7 +240,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     def jobs_partial(request: Request) -> HTMLResponse:
-        jobs = [_decorate(job) for job in store.list(limit=25)]
+        jobs = [
+            _decorate(job, settings.log_dir) for job in store.list(limit=25)
+        ]
         return render(request, "_jobs.html", jobs=jobs)
 
     def index_response(
@@ -232,7 +253,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         status_code: int = 200,
     ) -> HTMLResponse:
         values = values or {}
-        jobs = [_decorate(job) for job in store.list(limit=25)]
+        jobs = [
+            _decorate(job, settings.log_dir) for job in store.list(limit=25)
+        ]
         return render(
             request,
             "index.html",
@@ -324,7 +347,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=404,
                 job_id=job_id,
             )
-        return render(request, "job.html", job=_decorate(job))
+        return render(
+            request, "job.html", job=_decorate(job, settings.log_dir)
+        )
 
     @app.post("/jobs")
     async def create_job(
@@ -462,7 +487,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         async def stream() -> AsyncIterator[str]:
             offset = 0
             last_status: str | None = None
+            last_progress: tuple[Any, ...] | None = None
             idle_ticks = 0
+            tracker = ProgressTracker()
 
             while True:
                 if await request.is_disconnected():
@@ -486,6 +513,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     if chunk:
                         offset += len(chunk)
                         text = chunk.decode("utf-8", errors="replace")
+                        tracker.feed(text)
 
                 if text:
                     idle_ticks = 0
@@ -496,12 +524,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if job["status"] != last_status:
                     last_status = job["status"]
                     idle_ticks = 0
+                    yield _sse("status", {"status": last_status})
+
+                progress = tracker.snapshot(job["status"])
+                key = (
+                    progress.label,
+                    progress.detail,
+                    progress.percent,
+                    progress.indeterminate,
+                    tracker.output_dir,
+                )
+                if key != last_progress:
+                    last_progress = key
+                    idle_ticks = 0
                     yield _sse(
-                        "status",
+                        "progress",
                         {
-                            "status": last_status,
-                            "matched": job["matched"],
-                            "no_match": job["no_match"],
+                            "label": progress.label,
+                            "detail": progress.detail,
+                            "percent": progress.percent,
+                            "indeterminate": progress.indeterminate,
+                            "output_dir": tracker.output_dir
+                            or job["output_dir"],
                         },
                     )
 

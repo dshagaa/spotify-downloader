@@ -20,14 +20,17 @@ CREATE TABLE IF NOT EXISTS jobs (
     title_first      INTEGER NOT NULL DEFAULT 0,
     max_concurrent   INTEGER NOT NULL,
     download_archive INTEGER NOT NULL DEFAULT 0,
+    subfolder        TEXT NOT NULL DEFAULT '',
     output_dir       TEXT NOT NULL,
     status           TEXT NOT NULL,
     created_at       TEXT NOT NULL,
     started_at       TEXT,
     finished_at      TEXT,
     exit_code        INTEGER,
+    total_tracks     INTEGER NOT NULL DEFAULT 0,
     matched          INTEGER NOT NULL DEFAULT 0,
     no_match         INTEGER NOT NULL DEFAULT 0,
+    downloaded       INTEGER NOT NULL DEFAULT 0,
     error            TEXT
 );
 CREATE INDEX IF NOT EXISTS jobs_created_at ON jobs (created_at DESC);
@@ -58,7 +61,23 @@ class JobStore:
         self._lock = threading.Lock()
         with closing(self._connection()) as conn:
             conn.executescript(SCHEMA)
+            self._migrate(conn)
             conn.commit()
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Add columns introduced after the first release."""
+
+        columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(jobs)")
+        }
+        for name, ddl in (
+            ("total_tracks", "INTEGER NOT NULL DEFAULT 0"),
+            ("downloaded", "INTEGER NOT NULL DEFAULT 0"),
+            ("subfolder", "TEXT NOT NULL DEFAULT ''"),
+        ):
+            if name not in columns:
+                conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {ddl}")
 
     def _connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=30)

@@ -33,9 +33,10 @@
                  max="{{ max_concurrent }}" value="{{ selected_concurrent }}">
         </label>
       </div>
-      <label>Output subfolder <span class="muted">(optional)</span>
+      <label>Output subfolder
+        <span class="muted">(defaults to the playlist name)</span>
         <input name="subfolder" maxlength="64"
-               placeholder="chill-mix"
+               placeholder="playlist name"
                pattern="[A-Za-z0-9 ._-]{1,64}"
                value="{{ values.get('subfolder', '') }}">
       </label>

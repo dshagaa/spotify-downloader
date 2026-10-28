@@ -2,12 +2,17 @@ __version__ = "1.4.0"
 __author__ = "Cha @github.com/invzfnc"
 
 import concurrent.futures
+import json
+import re
 
 from typing import TypedDict
 from time import sleep
 from random import uniform
 from sys import exit, stdout
 from itertools import chain
+from pathlib import Path
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from spotapi import Public
 from yt_dlp import YoutubeDL
@@ -29,6 +34,70 @@ def log(message: str = "") -> None:
     """Write a whole line at once so concurrent workers do not interleave."""
 
     stdout.write(f"{message}\n")
+
+
+def resolve_archive_path(output_dir: str, archive: str) -> str:
+    """Return the path yt-dlp should use for its download archive.
+
+    Absolute paths are used as-is; relative ones are resolved inside the
+    output directory (the historical CLI behaviour).
+    """
+
+    if archive.startswith(("/", "\\")) or Path(archive).is_absolute():
+        return archive
+    return str(Path(output_dir) / archive)
+
+
+_UNSAFE_FILENAME_CHARS = re.compile(r'[\x00-\x1f\x7f<>:"/\\|?*]')
+_RESERVED_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{number}" for number in range(1, 10)}
+    | {f"LPT{number}" for number in range(1, 10)}
+)
+
+
+def sanitize_name(name: str, fallback: str = "Playlist") -> str:
+    """Turn a playlist title into a safe, portable folder name."""
+
+    cleaned = _UNSAFE_FILENAME_CHARS.sub(" ", name)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+    cleaned = cleaned[:80].rstrip(" .")
+    if not cleaned:
+        return fallback
+    if cleaned.upper() in _RESERVED_NAMES:
+        cleaned = f"_{cleaned}"
+    return cleaned
+
+
+def _playlist_id(value: str) -> str:
+    """Extract a bare playlist ID from a URL, URI or ID."""
+
+    value = value.strip()
+    if "playlist/" in value:
+        value = value.split("playlist/", 1)[1]
+    elif value.startswith("spotify:playlist:"):
+        value = value.split(":", 2)[2]
+    return value.split("?", 1)[0].split("#", 1)[0].strip("/")
+
+
+def get_playlist_name(playlist_url: str) -> str | None:
+    """Return the public playlist title, or ``None`` when unavailable."""
+
+    link = f"https://open.spotify.com/playlist/{_playlist_id(playlist_url)}"
+    request = Request(
+        f"https://open.spotify.com/oembed?{urlencode({'url': link})}",
+        headers={"User-Agent": f"spotify-dl/{__version__}"},
+    )
+    try:
+        with urlopen(request, timeout=15) as response:
+            payload = json.load(response)
+    except (OSError, ValueError):
+        return None
+
+    title = payload.get("title") if isinstance(payload, dict) else None
+    if not isinstance(title, str):
+        return None
+    return title.strip() or None
 
 
 def get_playlist_info(playlist_id: str) -> list[PlaylistInfo]:
@@ -165,6 +234,14 @@ def download_from_urls(urls: list[str], output_dir: str,
                        download_archive: str | None) -> None:
     """Downloads list of songs with yt-dlp"""
 
+    def report_download(status: dict) -> None:
+        """Log a marker for each finished download (used by the web UI)."""
+
+        if status.get("status") != "finished":
+            return
+        info = status.get("info_dict") or {}
+        log(f"[DONE] {info.get('title') or 'track'}")
+
     if not output_dir.endswith("/"):
         output_dir += "/"
 
@@ -202,12 +279,15 @@ def download_from_urls(urls: list[str], output_dir: str,
                                   {'key': 'FFmpegConcat',
                                    'only_multi_video': True,
                                    'when': 'playlist'}],
+               'progress_hooks': [report_download],
                'retries': 10,
                'writethumbnail': True}
 
     # place in download folder
     if download_archive:
-        options["download_archive"] = f"{output_dir}{download_archive}"
+        options["download_archive"] = resolve_archive_path(
+            output_dir, download_archive
+        )
 
     # downloads stream with highest bitrate
     with YoutubeDL(options) as ydl:
@@ -219,12 +299,22 @@ def main(playlist_id: str,
          audio_format: str,
          title_first: bool,
          concurrent_limit: int,
-         download_archive: str | None) -> None:
+         download_archive: str | None,
+         subfolder: str | None = None) -> None:
     playlist_info = get_playlist_info(playlist_id)
 
     if not playlist_info:
         print("Invalid playlist URL. Aborting operation.")
         exit(1)
+
+    if subfolder is None:
+        subfolder = sanitize_name(get_playlist_name(playlist_id) or "")
+
+    if subfolder:
+        output_dir = str(Path(output_dir) / subfolder)
+
+    log(f"[TOTAL] {len(playlist_info)}")
+    log(f"[OUTPUT] {output_dir}")
 
     download_urls = get_song_urls(playlist_info, concurrent_limit)
     download_from_urls(download_urls, output_dir, audio_format,

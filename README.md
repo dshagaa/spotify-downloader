@@ -52,6 +52,10 @@ Unlike most downloader, this program **does not** require a Spotify Developers a
   spotify-dl.exe -o path playlist_url
   ```
 
+  By default each playlist gets its own subfolder named after the playlist
+  (sanitized for use as a folder name). Use `--subfolder NAME` to pick a
+  different folder, or `--flat` to save directly into the output directory.
+
 - To change audio format (for example mp3):
   ```sh
   spotify-dl.exe -f mp3 playlist_url
@@ -150,7 +154,7 @@ Unlike most downloader, this program **does not** require a Spotify Developers a
 
 The repository also ships an optional web interface (FastAPI + Jinja/HTMX) to
 start downloads, watch live logs and keep a job history. One download runs at
-a time; new jobs wait in a queue.
+a time; new jobs wait in a queue. Each job shows a progress bar and live log.
 
 1. Install the web extras and start the server.
 
@@ -167,6 +171,9 @@ a time; new jobs wait in a queue.
    ```
 
 2. Open <http://localhost:8000> and sign in with `APP_PASSWORD`.
+
+Each playlist is stored in its own folder named after the playlist (sanitized
+for the filesystem) unless you enter an output subfolder on the form.
 
 The UI writes its SQLite history to `./data` and downloads to `./downloads`
 by default. Configure it with these environment variables:

@@ -14,6 +14,7 @@ from typing import Any
 
 from .config import Settings
 from .db import JobStore, utcnow
+from .progress import ProgressTracker
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CLI_ENTRYPOINT = PROJECT_ROOT / "spotify-dl.py"
@@ -75,6 +76,7 @@ class JobManager:
             title_first=int(title_first),
             max_concurrent=max_concurrent,
             download_archive=int(download_archive),
+            subfolder=subfolder,
             output_dir=str(output_dir),
             status="queued",
             created_at=utcnow(),
@@ -187,7 +189,14 @@ class JobManager:
         cancelled = self._is_cancelled(job_id)
         self._forget(job_id)
 
-        matched, no_match = _parse_stats(log_path)
+        tracker = ProgressTracker()
+        try:
+            tracker.feed(
+                log_path.read_text(encoding="utf-8", errors="replace")
+            )
+        except FileNotFoundError:
+            pass
+
         if cancelled:
             status = "cancelled"
             error = "Cancelled by user"
@@ -198,15 +207,19 @@ class JobManager:
             status = "failed"
             error = f"spotify-dl exited with code {exit_code}"
 
-        self.store.update(
-            job_id,
-            status=status,
-            finished_at=utcnow(),
-            exit_code=exit_code,
-            matched=matched,
-            no_match=no_match,
-            error=error,
-        )
+        fields: dict[str, Any] = {
+            "status": status,
+            "finished_at": utcnow(),
+            "exit_code": exit_code,
+            "total_tracks": tracker.total,
+            "matched": tracker.matched,
+            "no_match": tracker.no_match,
+            "downloaded": tracker.downloaded,
+            "error": error,
+        }
+        if tracker.output_dir:
+            fields["output_dir"] = tracker.output_dir
+        self.store.update(job_id, **fields)
 
     def _build_command(self, job: dict[str, Any]) -> list[str]:
         command = [
@@ -214,7 +227,7 @@ class JobManager:
             str(CLI_ENTRYPOINT),
             job["playlist_url"],
             "-o",
-            job["output_dir"],
+            str(self.settings.download_dir),
             "-f",
             job["audio_format"],
             "-c",
@@ -222,6 +235,8 @@ class JobManager:
         ]
         if job["title_first"]:
             command.append("--title-first")
+        if job["subfolder"]:
+            command.extend(["--subfolder", job["subfolder"]])
         if job["download_archive"]:
             command.extend(
                 [
@@ -258,17 +273,3 @@ def _terminate_tree(process: subprocess.Popen[bytes]) -> None:
             )
         except ProcessLookupError:
             pass
-
-
-def _parse_stats(log_path: Path) -> tuple[int, int]:
-    """Count matched and unmatched tracks from the CLI output.
-
-    Counts substrings rather than whole lines so that output interleaved by
-    concurrent workers is still counted correctly.
-    """
-
-    try:
-        text = log_path.read_text(encoding="utf-8", errors="replace")
-    except FileNotFoundError:
-        return 0, 0
-    return text.count("[FOUND]"), text.count("[NO MATCH]")

@@ -10,6 +10,7 @@
           <th>Playlist</th>
           <th>Format</th>
           <th>Status</th>
+          <th>Progress</th>
           <th>Created</th>
           <th><span class="sr-only">Actions</span></th>
         </tr>
@@ -26,6 +27,17 @@
           <td class="mono">{{ job.audio_format }}</td>
           <td>
             <span class="badge {{ job.status_class }}">{{ job.status }}</span>
+          </td>
+          <td class="progress-cell">
+            {% if job.is_active %}
+            <progress class="bar small{% if job.progress.indeterminate %} pending{% endif %}"
+                      max="100"
+                      value="{{ 0 if job.progress.indeterminate else job.progress.percent }}">
+            </progress>
+            <span class="muted small nowrap">{{ job.progress.percent }}%</span>
+            {% else %}
+            <span class="muted small">—</span>
+            {% endif %}
           </td>
           <td class="muted small nowrap">{{ job.created_display }}</td>
           <td class="actions-cell">

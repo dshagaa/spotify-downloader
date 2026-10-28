@@ -28,6 +28,21 @@ def parse_arguments() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--subfolder",
+        default=None,
+        metavar="NAME",
+        help="subfolder inside the output directory (default: a sanitized "
+             "version of the playlist name)"
+    )
+
+    parser.add_argument(
+        "--flat",
+        action="store_true",
+        help="save directly in the output directory instead of a "
+             "playlist subfolder"
+    )
+
+    parser.add_argument(
         "-f", "--audio-format",
         default=AUDIO_FORMAT,
         help=f"audio format for downloaded songs (default: {AUDIO_FORMAT})"
@@ -77,7 +92,8 @@ if __name__ == "__main__":
     try:
         main(args.playlist_url, args.output_dir,
              args.audio_format, args.title_first,
-             args.max_concurrent, args.download_archive)
+             args.max_concurrent, args.download_archive,
+             "" if args.flat else args.subfolder)
 
         print("Download completed.")
         sys.exit(0)

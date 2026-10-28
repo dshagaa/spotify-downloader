@@ -27,7 +27,11 @@
     var initialStatus = card.getAttribute("data-job-status");
     var log = document.getElementById("log");
     var badge = document.getElementById("job-status");
-    var stats = document.getElementById("job-stats");
+    var bar = document.getElementById("progress-bar");
+    var label = document.getElementById("progress-label");
+    var percent = document.getElementById("progress-percent");
+    var detail = document.getElementById("progress-detail");
+    var outputDir = document.getElementById("output-dir");
     var follow = true;
 
     if (log) {
@@ -61,12 +65,29 @@
         badge.textContent = data.status;
         badge.className = "badge " + statusClass(data.status);
       }
-      if (stats) {
-        stats.textContent =
-          data.matched +
-          " matched \u00b7 " +
-          data.no_match +
-          " not found";
+    });
+
+    source.addEventListener("progress", function (event) {
+      var data = JSON.parse(event.data);
+      if (label) {
+        label.textContent = data.label;
+      }
+      if (percent) {
+        percent.textContent = data.percent + "%";
+      }
+      if (detail) {
+        detail.textContent = data.detail;
+      }
+      if (outputDir && data.output_dir) {
+        outputDir.textContent = data.output_dir;
+      }
+      if (bar) {
+        bar.classList.toggle("pending", Boolean(data.indeterminate));
+        if (data.indeterminate) {
+          bar.removeAttribute("value");
+        } else {
+          bar.value = data.percent;
+        }
       }
     });
 
