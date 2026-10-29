@@ -6,6 +6,7 @@ import argparse
 import traceback
 
 from core import main
+from core import rebuild_playlist
 from core import DOWNLOAD_PATH, AUDIO_FORMAT, CONCURRENT_LIMIT
 
 
@@ -40,6 +41,13 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="save directly in the output directory instead of a "
              "playlist subfolder"
+    )
+
+    parser.add_argument(
+        "--playlist-only",
+        action="store_true",
+        help="only write the M3U8 playlist for files already present in "
+             "the output directory"
     )
 
     parser.add_argument(
@@ -86,6 +94,25 @@ if __name__ == "__main__":
     if args.max_concurrent <= 0:
         print("--max-concurrent should be an integer larger than 0")
         sys.exit(1)
+
+    if args.playlist_only:
+        print(f"Generating playlist for {args.playlist_url} "
+              f"in {args.output_dir}")
+        try:
+            playlist = rebuild_playlist(
+                args.playlist_url,
+                args.output_dir,
+                "" if args.flat else args.subfolder,
+            )
+        except Exception:
+            print(traceback.format_exc())
+            sys.exit(1)
+
+        if playlist is None:
+            print("No downloaded audio files found.")
+            sys.exit(1)
+        print(f"Playlist: {playlist}")
+        sys.exit(0)
 
     print(f"Starting download from {args.playlist_url} to {args.output_dir}")
 

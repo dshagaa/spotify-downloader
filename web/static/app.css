@@ -229,6 +229,11 @@ input:focus, select:focus {
   border-color: rgba(255, 107, 107, 0.35);
   color: #ffb3b3;
 }
+.alert.ok {
+  background: rgba(30, 215, 96, 0.1);
+  border-color: rgba(30, 215, 96, 0.35);
+  color: #a8f0c0;
+}
 
 .badge {
   display: inline-block;

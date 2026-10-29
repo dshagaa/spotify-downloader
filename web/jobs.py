@@ -115,6 +115,40 @@ class JobManager:
             _terminate_tree(process)
         return True
 
+    def generate_playlist(self, job_id: str) -> bool:
+        """Write the M3U8 playlist for a finished job from files on disk."""
+
+        job = self.store.get(job_id)
+        if job is None or job["status"] != "completed":
+            return False
+
+        command = [
+            sys.executable,
+            str(CLI_ENTRYPOINT),
+            job["playlist_url"],
+            "-o",
+            job["output_dir"],
+            "--flat",
+            "--playlist-only",
+        ]
+        environment = dict(
+            os.environ,
+            PYTHONUNBUFFERED="1",
+            PYTHONIOENCODING="utf-8",
+        )
+        try:
+            result = subprocess.run(
+                command,
+                cwd=PROJECT_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                env=environment,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return result.returncode == 0
+
     def _is_cancelled(self, job_id: str) -> bool:
         with self._cancel_lock:
             return job_id in self._cancelled

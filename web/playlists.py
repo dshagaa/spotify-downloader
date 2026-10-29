@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from urllib.parse import urlparse
 
 PLAYLIST_ID_RE = re.compile(r"^[A-Za-z0-9]{22}$")
@@ -61,3 +62,15 @@ def normalize_subfolder(raw: str | None) -> str:
             "dashes and underscores (max 64 characters)."
         )
     return value.strip(". ")
+
+
+def find_playlist_file(folder: Path) -> Path | None:
+    """Return the M3U8 playlist in a download folder, if one exists."""
+
+    try:
+        for path in folder.iterdir():
+            if path.is_file() and path.suffix.lower() == ".m3u8":
+                return path
+    except OSError:
+        return None
+    return None

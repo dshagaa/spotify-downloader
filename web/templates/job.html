@@ -67,6 +67,14 @@
     </p>
   </div>
   {% if job.error %}<p class="alert err">{{ job.error }}</p>{% endif %}
+  {% if playlist_notice == "created" %}
+  <p class="alert ok">Playlist file created.</p>
+  {% elif playlist_notice == "failed" %}
+  <p class="alert err">
+    Could not create the playlist file. Check that the folder contains
+    downloaded audio.
+  </p>
+  {% endif %}
 
   <div class="actions">
     {% if job.is_active %}
@@ -75,6 +83,12 @@
       <button class="btn danger" type="submit">Cancel download</button>
     </form>
     {% else %}
+    {% if job.show_playlist_button %}
+    <form method="post" action="/jobs/{{ job.id }}/playlist">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="btn ghost" type="submit">Generate playlist</button>
+    </form>
+    {% endif %}
     <form method="post" action="/jobs/{{ job.id }}/delete"
           data-confirm="Remove this job from history?">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

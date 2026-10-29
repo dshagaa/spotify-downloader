@@ -42,7 +42,11 @@ from .progress import (
     scan_log,
 )
 from .jobs import JobManager
-from .playlists import normalize_playlist, normalize_subfolder
+from .playlists import (
+    find_playlist_file,
+    normalize_playlist,
+    normalize_subfolder,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
@@ -152,6 +156,10 @@ def _decorate(job: dict[str, Any], log_dir: Path) -> dict[str, Any]:
     item["finished_display"] = _display_time(job.get("finished_at"))
     item["duration"] = _duration(job)
     item["progress"] = _progress(job, log_dir)
+    item["show_playlist_button"] = (
+        job["status"] == "completed"
+        and find_playlist_file(Path(job["output_dir"])) is None
+    )
     return item
 
 
@@ -348,7 +356,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 job_id=job_id,
             )
         return render(
-            request, "job.html", job=_decorate(job, settings.log_dir)
+            request,
+            "job.html",
+            job=_decorate(job, settings.log_dir),
+            playlist_notice=request.query_params.get("playlist"),
         )
 
     @app.post("/jobs")
@@ -439,6 +450,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if request.headers.get("HX-Request"):
             return jobs_partial(request)
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+    @app.post("/jobs/{job_id}/playlist")
+    async def generate_playlist(
+        request: Request,
+        job_id: str,
+        csrf_token: str = Form(...),
+        _: None = Depends(require_session),
+    ) -> Response:
+        check_csrf(request, csrf_token)
+        job = store.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404)
+        if job["status"] != "completed":
+            raise HTTPException(
+                status_code=409,
+                detail="Only completed jobs can generate a playlist.",
+            )
+        created = await asyncio.to_thread(manager.generate_playlist, job_id)
+        outcome = "created" if created else "failed"
+        return RedirectResponse(
+            f"/jobs/{job_id}?playlist={outcome}", status_code=303
+        )
 
     @app.post("/jobs/{job_id}/delete")
     async def delete_job(

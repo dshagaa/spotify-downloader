@@ -161,6 +161,14 @@ def _final_path(filename: str | None, audio_format: str) -> Path | None:
     return None
 
 
+def playlist_path(output_dir: str, playlist_name: str | None) -> Path:
+    """Return the M3U8 path for a playlist folder."""
+
+    base = Path(output_dir)
+    name = sanitize_name(playlist_name or base.name or "playlist")
+    return base / f"{name}.m3u8"
+
+
 def write_playlist_file(output_dir: str, playlist_name: str | None,
                         tracks: list[TrackRecord]) -> Path | None:
     """Write an M3U8 playlist of the downloaded tracks, in playlist order."""
@@ -169,8 +177,7 @@ def write_playlist_file(output_dir: str, playlist_name: str | None,
         return None
 
     base = Path(output_dir)
-    name = sanitize_name(playlist_name or base.name or "playlist")
-    target = base / f"{name}.m3u8"
+    target = playlist_path(output_dir, playlist_name)
 
     lines = ["#EXTM3U"]
     seen: set[str] = set()
@@ -193,6 +200,58 @@ def write_playlist_file(output_dir: str, playlist_name: str | None,
 
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return target
+
+
+AUDIO_EXTENSIONS = frozenset(
+    ("m4a", "mp3", "opus", "flac", "wav", "aac", "ogg", "webm", "mkv")
+)
+
+
+def _audio_files(folder: Path) -> list[Path]:
+    try:
+        files = [
+            path for path in folder.iterdir()
+            if path.is_file()
+            and path.suffix.lower().lstrip(".") in AUDIO_EXTENSIONS
+        ]
+    except OSError:
+        return []
+
+    def modified(path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    return sorted(files, key=lambda path: (modified(path), path.name.lower()))
+
+
+def rebuild_playlist(playlist_id: str, output_dir: str,
+                     subfolder: str | None) -> Path | None:
+    """Write the M3U8 for files that are already in the output folder.
+
+    Existing playlists are left untouched. Returns the playlist path, or
+    ``None`` when the folder has no downloaded audio files.
+    """
+
+    playlist_name = get_playlist_name(playlist_id)
+    if subfolder is None:
+        subfolder = sanitize_name(playlist_name or "")
+    if subfolder:
+        output_dir = str(Path(output_dir) / subfolder)
+
+    folder = Path(output_dir)
+    target = playlist_path(output_dir, playlist_name or folder.name)
+    if target.exists():
+        return target
+
+    tracks: list[TrackRecord] = [
+        {"title": path.stem, "artist": "", "path": str(path)}
+        for path in _audio_files(folder)
+    ]
+    return write_playlist_file(
+        output_dir, playlist_name or folder.name, tracks
+    )
 
 
 class _TrackingYDL(YoutubeDL):
